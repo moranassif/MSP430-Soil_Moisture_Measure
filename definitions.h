@@ -10,13 +10,18 @@
 
 // General
 #define TICKS_FOR_SEC 1000000L // Approx
-#define PWM_PERIOD 50
+#define PWM_PERIOD 500
 
 // Port 1
 #define LED0 BIT0
 #define LED1 BIT6
 #define BUTTON BIT3
-// Port 2
-#define BUZZER 8	// Pin 8 is P2.0
+#define A2D_PIN BIT2 // Change also INCH in a2d if using bit other than 2
+
+// Port 1
+#define BUZZER_PIN BIT3
+
+// Globals
+extern int button_was_pressed;
 
 #endif /* DEFINITIONS_H_ */

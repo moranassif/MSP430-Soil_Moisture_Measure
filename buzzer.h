@@ -8,6 +8,8 @@
 #ifndef BUZZER_H_
 #define BUZZER_H_
 
+void InitializeBuzzer(int pin_bit);
+
 /* This function uses the buzzer to buzz the given
  * number digit by digit from lsb to msb*/
 void BuzzNumber(int number, int pin_bit);

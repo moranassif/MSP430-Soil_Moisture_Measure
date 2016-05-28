@@ -9,5 +9,7 @@
 #define TIMER_H_
 
 void InitializeTimer0(void);
+void StartPWM(void);
+void StopPWM(void);
 
 #endif /* TIMER_H_ */

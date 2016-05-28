@@ -24,20 +24,28 @@ void InitializeButton(void)
 #pragma vector=PORT1_VECTOR
 __interrupt void PORT1_ISR(void)
 {
+  // Button handling
   P1IFG &= ~BUTTON;                 // Clear the interrupt flag for the button
   P1IE &= ~BUTTON;                  // Disable Button interrupt
-  WDTCTL = WDT_ADLY_250;             // Start and set watchdog timer (WDT) to trigger every 250ms
+  WDTCTL = WDT_ADLY_250;            // Start and set watchdog timer (WDT) to trigger every 250ms
   IFG1 &= ~WDTIFG;                  // Clear the interrupt flag for the WDT
   IE1 |= WDTIE;                     // enable WDT interrupt
 
-  P1OUT ^= (LED0);                // Set the LED P1.0 to on
+  // Led handling
+  P1OUT |= (LED0);                  // Set the LED P1.0 to on
+
+  // Set global
+  button_was_pressed = 1;
+  __bic_SR_register_on_exit(CPUOFF);        // Return to active mode
 }
 
 // WDT Interrupt Service Routine used to de-bounce button press
 #pragma vector=WDT_VECTOR
 __interrupt void WDT_ISR(void)
 {
-    IE1 &= ~WDTIE;                   // disable Watchdog timer (WDT) interrupt
+	P1IFG &= ~BUTTON;
+	P1OUT &= ~LED0;                  // Set the LED P1.0 to on
+	IE1 &= ~WDTIE;                   // disable Watchdog timer (WDT) interrupt
     IFG1 &= ~WDTIFG;                 // clear WDT interrupt flag
     WDTCTL = WDTPW + WDTHOLD;        // put WDT back in hold state
     P1IE |= BUTTON;                  // Reenable interrupts for the button

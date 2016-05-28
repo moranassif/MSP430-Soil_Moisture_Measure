@@ -20,9 +20,14 @@
 #include "buzzer.h"
 #include "button.h"
 #include "timer.h"
+#include "a2d.h"
+
+int button_was_pressed = 0;
 
 void main(void)
 {
+	int a2d_value;
+
 	WDTCTL = WDTPW + WDTHOLD;			// Stop WDT
 
 	// Define pins
@@ -34,8 +39,22 @@ void main(void)
 
 	// Button interrupt
 	InitializeButton();
+	// Buzzer init
+	InitializeBuzzer(BUZZER_PIN);
 
-	// LPM higher than 1 does not seem to support the button interrupt
-	_BIS_SR(LPM1_bits+GIE);        // Enter LPM1 with interrupts enabled
-	//_BIS_SR(LPM3_bits + GIE);			// Enter LPM3 w/ interrupt
+	// A2d stuff
+	InitializeA2D();
+
+	while (1)
+	{
+		__delay_cycles(1000);				// Wait for ADC Ref to settle
+		// LPM higher than 1 does not seem to support the button interrupt
+		_BIS_SR(CPUOFF+GIE);        // Enter LPM1 with interrupts enabled
+		// Handle button
+		if (button_was_pressed == 1) {
+			button_was_pressed = 0;
+			a2d_value = GetA2dSample();
+			BuzzNumber(a2d_value, BUZZER_PIN);
+		}
+	}
 }
