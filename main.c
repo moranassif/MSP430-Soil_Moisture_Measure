@@ -29,16 +29,21 @@
 #define BUTTON BIT3
 #define A2D_PIN BIT2 // Change also INCH in a2d if using bit other than 2
 
-// Port 1
-#define BUZZER_PIN BIT3
+// Port 2
+#define POWER_OUTPUT_PIN BIT4
+
+#define BASE_ADDR 0x0E000
+#define CUR_ADDR_ADDR 0xF600
 
 // Globals
 int sample_and_log;
 
-int currentMinutes = 50;
-int currentHours = 22;
-int *addr = (int *)0x0E000 ; // Address of the flash memory segment starting
+unsigned int currentMinutes = 50;
+unsigned int currentHours = 21;
+unsigned int *cur_addr_p = (unsigned int *)CUR_ADDR_ADDR ; // Address of the flash memory segment starting
+unsigned int *addr;
 int button_was_pressed = 0;
+int powering_up;
 
 
 ////////////
@@ -55,8 +60,8 @@ __interrupt void Timer_A1 (void)
 			 currentHours = 0;
 		 }
 	 }
-	 // Log the sample every 30 minutes
-	 if (currentMinutes % 30 == 0) {
+	 // Log the sample every 20 minutes
+	 if (currentMinutes % 20 == 0) {
 		 sample_and_log = 1;
 		 __bic_SR_register_on_exit(CPUOFF);        // Return to active mode
 	 }
@@ -67,8 +72,8 @@ void InitializeTimer0(void)
 	BCSCTL1 |= DIVA_3;				// ACLK/8
 	BCSCTL3 |= XCAP_3;				//12.5pF cap- setting for 32768Hz crystal
 
-	currentMinutes = 42;
-	currentHours = 22;
+	currentMinutes = 00;
+	currentHours = 19;
 
 	/*** Timer0_A Set-Up ***/
 	/*TA0CCR0 |= PWM_PERIOD;			// PWM period
@@ -99,9 +104,11 @@ void InitializeA2D(void)
 
 unsigned int GetA2dSample() {
 	unsigned int return_value;
+	SetPowerOutputHigh();
 	ADC10CTL0 |= ENC + ADC10SC;			// Sampling and conversion start
 	__bis_SR_register(CPUOFF + GIE);	// Low Power Mode 0 with interrupts enabled
 	return_value = ADC10MEM;				// Assigns the value held in ADC10MEM to the integer called ADC_value
+	SetPowerOutputLow();
 	return return_value;
 }
 
@@ -162,44 +169,33 @@ __interrupt void WDT_ISR(void)
 }
 
 
-////////////
-// Buzzer //
-////////////
-void InitializeBuzzer(int pin_bit)
+//////////////////
+// Power output //
+//////////////////
+void InitializePowerOutput()
 {
-	P2DIR |= pin_bit;
-	P2OUT &= ~pin_bit;
+	P2DIR |= POWER_OUTPUT_PIN;
+	P2OUT &= ~POWER_OUTPUT_PIN;
 }
 
-/* This function uses to buzzer to sound the given digit
- * in a series of buzzing sounds */
-void BuzzDigit(int digit, int pin_bit)
+void SetPowerOutputHigh()
 {
-	int i;
-	for (i=0; i < digit; i++) {
-		P2OUT |= pin_bit;
-		__delay_cycles(TICKS_FOR_SEC/3);
-		P2OUT &= ~pin_bit;
-		__delay_cycles(TICKS_FOR_SEC/3);
-	}
+		P2OUT |= POWER_OUTPUT_PIN;
+		__delay_cycles(1000);
 }
 
-/* This function uses the buzzer to buzz the given
- * number digit by digit from lsb to msb*/
-void BuzzNumber(int number, int pin_bit)
+void SetPowerOutputLow()
 {
-	while (number > 0) {
-		BuzzDigit(number % 10, pin_bit);
-		__delay_cycles(TICKS_FOR_SEC);
-		number /= 10;
-	}
+		P2OUT &= ~POWER_OUTPUT_PIN;
+		__delay_cycles(1000);
 }
+
 
 ///////////
 // Flash //
 ///////////
 
-void flash_write(int *addr, int data)
+void flash_write(unsigned int *addr, unsigned int data)
 {
   __disable_interrupt();
   FCTL2 = FWKEY + FSSEL_1 + FN0;       // Clk = SMCLK/4
@@ -212,6 +208,32 @@ void flash_write(int *addr, int data)
   FCTL3 = FWKEY + LOCK;                 // Set LOCK bit
   while(BUSY & FCTL3);
   __enable_interrupt();
+}
+
+void flash_erase(unsigned int *addr)
+{
+  __disable_interrupt();               // Disable interrupts. This is important, otherwise,
+                                       // a flash operation in progress while interrupt may
+                                       // crash the system.
+  while(BUSY & FCTL3);                 // Check if Flash being used
+  FCTL2 = FWKEY + FSSEL_1 + FN3;       // Clk = SMCLK/4
+  FCTL1 = FWKEY + ERASE;               // Set Erase bit
+  FCTL3 = FWKEY;                       // Clear Lock bit
+  *addr = 0;                           // Dummy write to erase Flash segment
+  while(BUSY & FCTL3);                 // Check if Flash being used
+  FCTL1 = FWKEY;                       // Clear WRT bit
+  FCTL3 = FWKEY + LOCK;                // Set LOCK bit
+  __enable_interrupt();
+}
+
+unsigned int get_last_address() {
+
+	if (*cur_addr_p == 0xFFFF) {
+		return BASE_ADDR; // Old value
+	} else {
+		return *cur_addr_p; // New one
+	}
+
 }
 
 //////////
@@ -228,16 +250,20 @@ void main(void)
 	P1DIR |= (LED0+LED1);					// set P1.0 (LED1) as output
 	P1OUT &= ~(LED1);					// P1.0 low
 
+	powering_up = 1;
+
 	// Timer interrupt
 	InitializeTimer0();
 
 	// Button interrupt
 	InitializeButton();
-	// Buzzer init
-	InitializeBuzzer(BUZZER_PIN);
+	// Power output init
+	InitializePowerOutput();
 
 	// A2d stuff
 	InitializeA2D();
+
+	addr = (unsigned int *) get_last_address();
 
 	while (1)
 	{
@@ -249,20 +275,28 @@ void main(void)
 			__delay_cycles(1000);				// Wait for ADC Ref to settle
 			sample_and_log = 0;
 			a2d_value = GetA2dSample();
+			addr = (unsigned int*)get_last_address();
 			// Write sample and time to the flash
 			flash_write(addr++, currentHours);
 			flash_write(addr++, currentMinutes);
 			flash_write(addr++, a2d_value);
 			if (button_was_pressed) {
 				flash_write(addr++, 0x17); // Sanity
-				BuzzNumber(a2d_value, BUZZER_PIN);
 			} else {
-				flash_write(addr++, 0x42); // Sanity
+				if (powering_up) {
+					flash_write(addr++, 0x35); // Signal
+					powering_up = 0;
+				} else {
+					flash_write(addr++, 0x42); // Sanity
+				}
 			}
+			// Save the address
+			flash_erase((unsigned int *)CUR_ADDR_ADDR);
+			flash_write((unsigned int *)CUR_ADDR_ADDR, (unsigned int)addr);
 			button_was_pressed = 0;
 			P1OUT &= ~LED1;	// Deactivate LED1 and VCC to the resistance meter
 			// If full, stop increasing
-			if (addr > (int *)0xFF00) {
+			if ((unsigned int)addr >= CUR_ADDR_ADDR) {
 				P1OUT |= LED0;
 				_BIS_SR(CPUOFF);        // Enter LPM1
 			}
